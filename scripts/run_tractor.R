@@ -342,13 +342,15 @@ RunTractor <- function(prefix, phenofile, sampleidcol, phenocol, covarcollist, c
                             N      = extracted_info$N
                           } else if (method == "logistic") {
                             if (!is.null(COV_)){
-                              model = glm(y ~ LAG_ + COV_, family = binomial(link = "logit"))
+                              full_model = glm(y ~ LAG_ + COV_, family = binomial(link = "logit"))
+                              reduced_model = glm(y ~ LAG_[, LA_rownames, drop=FALSE] + COV_, family = binomial(link = "logit"))
                             } else {
-                              model = glm(y ~ LAG_, family = binomial(link = "logit"))
+                              full_model = glm(y ~ LAG_, family = binomial(link = "logit"))
+                              reduced_model = glm(y ~ LAG_[, LA_rownames, drop=FALSE], family = binomial(link = "logit"))
                             }
                             
-                            if (model$converged == TRUE){
-                              extracted_info <- extract_model_info(model, coef_rownames, LA_rownames, G_rownames)
+                            if (full_model$converged == TRUE){
+                              extracted_info <- extract_model_info(full_model, coef_rownames, LA_rownames, G_rownames)
                               LAeff  = extracted_info$LAeff
                               LApval = extracted_info$LApval
                               Geff   = extracted_info$Geff
@@ -356,6 +358,13 @@ RunTractor <- function(prefix, phenofile, sampleidcol, phenocol, covarcollist, c
                               Gtval  = extracted_info$Gtval
                               Gpval  = extracted_info$Gpval
                               N      = extracted_info$N
+                            
+                              # Perform LRT if full model converged
+                              if (reduced_model$converged) {
+                                  lrt_pval <- anova(reduced_model, full_model, test = "LRT")$`Pr(>Chi)`[2]
+                              } else {
+                                  lrt_pval <- NA
+                              }
                             } else {
                               # if glm doesn't converge, set effect size and P value as NA
                               LAeff     = rep(NA, length(LA_rownames))
@@ -365,6 +374,7 @@ RunTractor <- function(prefix, phenofile, sampleidcol, phenocol, covarcollist, c
                               Gtval     = rep(NA, length(G_rownames))
                               Gpval     = rep(NA, length(G_rownames))
                               N         = sum(complete.cases(model$model))
+                              lrt_pval  = NA
                             }
                           }
                           
@@ -386,7 +396,8 @@ RunTractor <- function(prefix, phenofile, sampleidcol, phenocol, covarcollist, c
                             temp_result[[paste0("LApval_anc",ancid)]]     <- LApval[ancid+1]
                             temp_result[[paste0("LAeff_anc", ancid)]]     <- round(LAeff[ancid+1], 6)
                           }
-                          
+
+                          temp_result[, joint_pval := lrt_pval]
                           # df_result <- rbind(df_result, temp_result)
                           list(temp_result)
                         }
