@@ -105,7 +105,7 @@ subset_mat_NA = function(rows, mat) {
 }
 
 # Extract model coefficients and values
-extract_model_info <- function(model, coef_rownames, LA_rownames, G_rownames) {
+extract_model_info <- function(model, coef_rownames, LA_rownames, G_rownames, reduced_model = NULL) {
   
   coefs     <- summary(model)$coefficients
   reg_res   <- subset_mat_NA(coef_rownames, coefs)
@@ -120,7 +120,15 @@ extract_model_info <- function(model, coef_rownames, LA_rownames, G_rownames) {
   
   N         <- sum(complete.cases(model$model))
   
-  # Return a list with extracted information
+  # Calculate joint p-value if reduced model is provided
+  joint_pval <- if (!is.null(reduced_model) && 
+                    reduced_model$converged && 
+                    model$converged) {
+    suppressWarnings(
+      anova(reduced_model, model, test = "LRT")$`Pr(>Chi)`[2]
+    )
+  } else NA_real_
+  
   return(list(
     LAeff  = LAeff,
     LApval = LApval,
@@ -128,7 +136,8 @@ extract_model_info <- function(model, coef_rownames, LA_rownames, G_rownames) {
     Gstderr = Gstderr,
     Gtval  = Gtval,
     Gpval  = Gpval,
-    N      = N
+    N      = N,
+    joint_pval = joint_pval
   ))
 }
 
@@ -341,65 +350,77 @@ RunTractor <- function(prefix, phenofile, sampleidcol, phenocol, covarcollist, c
                             Gpval  = extracted_info$Gpval
                             N      = extracted_info$N
                           } else if (method == "logistic") {
+                            # Fit full model (original code)
                             if (!is.null(COV_)){
-                              full_model = glm(y ~ LAG_ + COV_, family = binomial(link = "logit"))
-                              reduced_model = glm(y ~ LAG_[, LA_rownames, drop=FALSE] + COV_, family = binomial(link = "logit"))
+                                full_model = glm(y ~ LAG_ + COV_, family = binomial(link = "logit"))
                             } else {
-                              full_model = glm(y ~ LAG_, family = binomial(link = "logit"))
-                              reduced_model = glm(y ~ LAG_[, LA_rownames, drop=FALSE], family = binomial(link = "logit"))
+                                full_model = glm(y ~ LAG_, family = binomial(link = "logit"))
+                            }
+                            
+                            # NEW: Fit reduced model for joint test
+                            if (!is.null(COV_)){
+                                reduced_model = tryCatch(
+                                    glm(y ~ LAG_[, LA_rownames, drop=FALSE] + COV_, family = binomial(link = "logit")),
+                                    error = function(e) NULL
+                                )
+                            } else {
+                                reduced_model = tryCatch(
+                                    glm(y ~ LAG_[, LA_rownames, drop=FALSE], family = binomial(link = "logit")),
+                                    error = function(e) NULL
+                                )
                             }
                             
                             if (full_model$converged == TRUE){
-                              extracted_info <- extract_model_info(full_model, coef_rownames, LA_rownames, G_rownames)
-                              LAeff  = extracted_info$LAeff
-                              LApval = extracted_info$LApval
-                              Geff   = extracted_info$Geff
-                              Gstderr = extracted_info$Gstderr
-                              Gtval  = extracted_info$Gtval
-                              Gpval  = extracted_info$Gpval
-                              N      = extracted_info$N
-                            
-                              # Perform LRT if full model converged
-                              if (reduced_model$converged) {
-                                  lrt_pval <- anova(reduced_model, full_model, test = "LRT")$`Pr(>Chi)`[2]
-                              } else {
-                                  lrt_pval <- NA
-                              }
+                                # NEW: Pass reduced_model to extract_model_info
+                                extracted_info <- extract_model_info(full_model, coef_rownames, LA_rownames, G_rownames, reduced_model)
+                                LAeff  = extracted_info$LAeff
+                                LApval = extracted_info$LApval
+                                Geff   = extracted_info$Geff
+                                Gstderr = extracted_info$Gstderr
+                                Gtval  = extracted_info$Gtval
+                                Gpval  = extracted_info$Gpval
+                                N      = extracted_info$N
+                                lrt_pval = extracted_info$joint_pval  # NEW: Get joint p-value
                             } else {
-                              # if glm doesn't converge, set effect size and P value as NA
-                              LAeff     = rep(NA, length(LA_rownames))
-                              LApval    = rep(NA, length(LA_rownames))
-                              Geff      = rep(NA, length(G_rownames))
-                              Gstderr   = rep(NA, length(G_rownames))
-                              Gtval     = rep(NA, length(G_rownames))
-                              Gpval     = rep(NA, length(G_rownames))
-                              N         = sum(complete.cases(model$model))
-                              lrt_pval  = NA
+                                # if glm doesn't converge, set effect size and P value as NA
+                                LAeff     = rep(NA, length(LA_rownames))
+                                LApval    = rep(NA, length(LA_rownames))
+                                Geff      = rep(NA, length(G_rownames))
+                                Gstderr   = rep(NA, length(G_rownames))
+                                Gtval     = rep(NA, length(G_rownames))
+                                Gpval     = rep(NA, length(G_rownames))
+                                N         = sum(complete.cases(full_model$model))
+                                lrt_pval  = NA  # NEW: Set joint p-value as NA
                             }
-                          }
-                          
-                          temp_result <- data.table(CHR = data[[1]][[i,1]],
-                                                    POS = data[[1]][[i,2]],
-                                                    ID  = data[[1]][[i,3]],
-                                                    REF = data[[1]][[i,4]],
-                                                    ALT = data[[1]][[i,5]],
-                                                    N   = N)
-                          for (ancid in 0:(nAnc-1)) {
+                        }
+                        
+                        temp_result <- data.table(CHR = data[[1]][[i,1]],
+                                                POS = data[[1]][[i,2]],
+                                                ID  = data[[1]][[i,3]],
+                                                REF = data[[1]][[i,4]],
+                                                ALT = data[[1]][[i,5]],
+                                                N   = N)
+                        
+                        # Ancestry-specific results (unchanged)
+                        for (ancid in 0:(nAnc-1)) {
                             temp_result[[paste0("AF_anc",ancid)]]         <- round(AF[ancid+1],6)
                             temp_result[[paste0("LAprop_anc", ancid)]]    <- round(LAprop[ancid+1],6)
                             temp_result[[paste0("beta_anc", ancid)]]      <- round(Geff[ancid+1],6)
                             temp_result[[paste0("se_anc", ancid)]]        <- round(Gstderr[ancid+1], 4)
                             temp_result[[paste0("pval_anc", ancid)]]      <- Gpval[ancid+1]
                             temp_result[[paste0("tval_anc", ancid)]]      <- round(Gtval[ancid+1], 4)
-                          }
-                          for (ancid in 0:(nAnc-2)) {
+                        }
+                        
+                        # Local ancestry terms (unchanged)
+                        for (ancid in 0:(nAnc-2)) {
                             temp_result[[paste0("LApval_anc",ancid)]]     <- LApval[ancid+1]
                             temp_result[[paste0("LAeff_anc", ancid)]]     <- round(LAeff[ancid+1], 6)
-                          }
-
-                          temp_result[, joint_pval := lrt_pval]
-                          # df_result <- rbind(df_result, temp_result)
-                          list(temp_result)
+                        }
+                        
+                        # NEW: Add joint test p-value
+                        temp_result[, joint_pval := lrt_pval]
+                        
+                        list(temp_result)
                         }
     
     combined_result <- rbindlist(results)
