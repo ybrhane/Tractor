@@ -317,7 +317,7 @@ RunTractor <- function(prefix, phenofile, sampleidcol, phenocol, covarcollist, c
                         .combine='c',
                         .inorder = TRUE,
                         .packages=dopar_packages,
-                        .export=c(dopar_functions,"lrt_pval")) %dopar% {
+                        .export=dopar_functions) %dopar% {
                           
                           LAG_ = sapply(data, function(dt) dt[i, 6:ncol(dt), with = FALSE]) %>%
                             as.numeric() %>%
