@@ -360,12 +360,14 @@ RunTractor <- function(prefix, phenofile, sampleidcol, phenocol, covarcollist, c
                             # NEW: Fit reduced model for joint test
                             if (!is.null(COV_)){
                                 reduced_model = tryCatch(
-                                    glm(y ~ LAG_[, LA_rownames, drop=FALSE] + COV_, family = binomial(link = "logit")),
+                                    #glm(y ~ LAG_[, LA_rownames, drop=FALSE] + COV_, family = binomial(link = "logit")),
+                                    glm(y ~ COV_, family = binomial(link = "logit")),
                                     error = function(e) NULL
                                 )
                             } else {
                                 reduced_model = tryCatch(
-                                    glm(y ~ LAG_[, LA_rownames, drop=FALSE], family = binomial(link = "logit")),
+                                    #glm(y ~ LAG_[, LA_rownames, drop=FALSE], family = binomial(link = "logit")),
+                                    glm(y ~ 1, family = binomial(link = "logit")),
                                     error = function(e) NULL
                                 )
                             }
